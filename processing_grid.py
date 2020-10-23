@@ -74,13 +74,7 @@ if not 'Annual_Load_MWh' in bt.columns:
     bt['Annual_Load_MWh'] = equal_total_load(bt,iris,lv_per_geo=lv_iris.Nb_BT)
 if not 'Pmax_MW' in bt.columns:
     # creating profile for each IRIS:
-    profs = {}
-    for geo in bt.Geo:
-        profs[geo] = (profiles * iris[['Conso_PRO', 'Conso_RES', 'Conso_Agriculture', 'Conso_Tertiaire', 'Conso_Industrie']].loc[geo].values).sum(axis=1)
-    profs = pd.DataFrame(profs)
-    profs = profs / profs.max() # profiles in pu, with peak load==1
-    bad_cols = profs.max()[profs.max(axis=0).isnull()].index
-    profs[bad_cols] = 0
+    profs = get_profiles_per_geo(bt, profiles, iris, MW=False)
     # profs[iris] is a yearly profile with max=1
     # peak_factor is the peak_load [MW] / annual_load [MW] (/2 bcs i have 30min values)
     power_factor = 1/(profs.sum()/2)
@@ -117,3 +111,7 @@ bt.to_csv(folder + r'ProcessedData\\' +  'MVLV_full.csv')
 ps.to_csv(folder + r'ProcessedData\\' +  'SS_full.csv')
 hta.to_csv(folder + r'ProcessedData\\' +  'MVLines_full.csv')
 fnodes.to_csv(folder + r'ProcessedData\\' +  'Nodes_full.csv')
+
+try:
+    profs.to_csv(folder + r'ProcessedData\\' +  'profiles_per_iris.csv')
+    print('Saving IRIS profiles:\n\IRIS: {}\n\t'.format(profs.shape[1]))

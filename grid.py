@@ -423,6 +423,25 @@ def equal_total_load(lv, consos, lv_per_geo=None):
     
     return load/div
 
+def get_profiles_per_geo(lv, profiles_per_type, consos, MW=False):
+    """ Returns a Dataframe of load profiles per IRIS
+    if MW == True:
+        returns the profiles in power (MW)
+    if MW is False:
+        returns the profiles with max == 1
+    """
+    cols = ['Conso_RES', 'Conso_PRO', 'Conso_Industrie', 'Conso_Tertiaire', 'Conso_Agriculture']
+    profs = {}
+    for geo in lv.Geo.unique():
+        profs[geo] = (profiles_per_type * consos[cols].loc[geo].values).sum(axis=1)
+    profs = pd.DataFrame(profs)
+    # correct null values to 0
+    profs.fillna(0, inplace=True)
+    if MW:
+        return profs
+    else:
+        return profs / profs.max()
+        
 #%% Assign tech data
 
 def compute_cum_load(lines, lv, n0, d0=None):
@@ -602,11 +621,13 @@ class on_off_lines:
         else:
             self.ax = ax
             self.f = ax.figure
-            # Setting figure as full screen, works in windows 
-            #(might need to change plt manager https://stackoverflow.com/questions/12439588/how-to-maximize-a-plt-show-window-using-python)
-
-        self.ax.set_position([0.125,0.2,0.775,0.68])
-        plt.get_current_fig_manager().window.showMaximized()
+        # Setting figure as full screen, works in windows 
+        #(might need to change plt manager https://stackoverflow.com/questions/12439588/how-to-maximize-a-plt-show-window-using-python)
+        try:
+            self.ax.set_position([0.125,0.2,0.775,0.68])
+            plt.get_current_fig_manager().window.showMaximized()
+        except:
+            pass
         
         fs  = self.lines.Feeder.unique()
         self.feeders = np.sort([f for f in fs if f==f])
