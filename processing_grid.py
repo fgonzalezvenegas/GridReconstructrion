@@ -57,6 +57,17 @@ folder_lv = r'c:\user\U546416\Documents\PhD\Data\Conso-Reseau\Réseau\\'
 lv_iris = pd.read_csv(folder_lv+'Nb_BT_IRIS2016.csv',
                       engine='python', index_col=0)
 #%% Assigning Geographic zone to each LV load
+
+# Main node
+ps0 = 'Boriette'
+n0 = ps.node[ps0]
+
+# Departement(s) of case study: To change for each case! (this is just to reduce the data size)
+dep = [19]
+polys = iris_poly[iris_poly.DEP_CODE.isin(dep)][['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
+polys.columns = ['Name', 'Polygon', 'xGPS', 'yGPS']
+
+
 if not 'Geo_Name' in bt.columns:
     assign_polys(bt, polys)
 if not 'Annual_Load_MWh' in bt.columns:
@@ -79,14 +90,6 @@ if not 'Pmax_MW' in bt.columns:
 #%% Compute independent feeders, open plot to define open/closed lines, compute tech data (if needed), and save
 if not ('Connected' in hta.columns):
     hta['Connected'] = True
-# Main node
-ps0 = 'Boriette'
-n0 = ps.node[ps0]
-
-dep = 19
-polys = iris_poly[iris_poly.DEP_CODE == dep][['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
-polys.columns = ['Name', 'Polygon', 'xGPS', 'yGPS']
-
 
 off = on_off_lines(hta, n0, ss=ps, lv=bt, GPS=True, geo=polys, 
                    tech=tech, nodes=fnodes,
