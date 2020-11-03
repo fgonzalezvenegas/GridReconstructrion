@@ -152,9 +152,11 @@ def get_ind_feeders_nx(lines, n0, verbose=False):
     nfs = 0
     for fs in cc:
         lls = lines[(lines.node_i.isin(fs)) | (lines.node_e.isin(fs))].index
-        feeder[lls] = nfs
-        feeder_length[nfs] = lines.Length[lls].sum()
-        nfs += 1
+        # check if lines are connected to main node, otherwise skip
+        if (n0 in lines.node_i[lls].values) or (n0 in lines.node_e[lls].values):
+            feeder[lls] = nfs
+            feeder_length[nfs] = lines.Length[lls].sum()
+            nfs += 1
     # renaming feeders from shortest to longest
     feeder_length = pd.Series(feeder_length)
     feeder_length.sort_values(inplace=True)
@@ -396,12 +398,13 @@ def assign_polys(lv, geo, dt=0.05):
     print('Assigning Geographic zone to each point')
     for load in lv.index:
         point = lv[['xGPS', 'yGPS']].loc[load]
-        g = assign_poly(point, geo, dt)
-        if g is None:
-            g = assign_poly(point, geo, dt*2, notdt=dt)
+        g = assign_poly(point, geo, dt=dt, notdt=0)
+        while g is None:
+            dt = dt*2
+            g = assign_poly(point, geo, dt=dt, notdt=dt/2)         
         geo_lv[load] = g
         i += 1
-        if i%50 == 0:
+        if i%500 == 0:
             print('\t{}'.format(i))
     lv['Geo'] = pd.Series(geo_lv)
     if 'Name' in geo.columns:
@@ -433,7 +436,9 @@ def get_profiles_per_geo(lv, profiles_per_type, consos, MW=False):
     cols = ['Conso_RES', 'Conso_PRO', 'Conso_Industrie', 'Conso_Tertiaire', 'Conso_Agriculture']
     profs = {}
     for geo in lv.Geo.unique():
-        profs[geo] = (profiles_per_type * consos[cols].loc[geo].values).sum(axis=1)
+        # omits nan assignmetns (avoid crashing the program)
+        if geo == geo:
+            profs[geo] = (profiles_per_type * consos[cols].loc[geo].values).sum(axis=1)
     profs = pd.DataFrame(profs)
     # correct null values to 0
     profs.fillna(0, inplace=True)
@@ -726,37 +731,59 @@ class on_off_lines:
     def draw(self):
         """ Draw  the grid
         """        
+        self.draw_lines()
+        self.draw_else()
+        self.set_view()
+
+    def remove_lines(self):
+        for i in self.pltlines:
+            i.remove()
+    
+    def set_view(self):
+        if self.currentview is not None:
+            self.ax.axis(self.currentview)
+        self.ax.set_aspect('equal')
+        
+    def draw_lines(self):
+        self.pltlines = []
         if self.line_view == 'Feeder':
             # Better way might be to just turn on/off these artists
             for i, f in enumerate(self.feeders):
                 plot_lines(self.lines[(self.lines.Feeder==f) & (self.lines.Connected) & (self.lines.Type == 'Underground')], 
                                       col=self.col, ax=self.ax, 
                                       color=colors[int(i%len(colors))], picker=5, label=f, linewidth=2) 
-                
+                self.pltlines.append(self.ax.collections[-1])
                 plot_lines(self.lines[(self.lines.Feeder==f) & (self.lines.Connected) & (self.lines.Type == 'Overhead')], 
                                       col=self.col, ax=self.ax, 
                                       color=colors[int(i%len(colors))], picker=5, linewidth=1)
+                self.pltlines.append(self.ax.collections[-1])
                 px, py = get_farther(self.ss[self.ss.node == self.n0].iloc[0], self.lines[self.lines.Feeder == f])
-                self.ax.text(px + self.dtext, py + self.dtext, f)
+                lt = self.ax.text(px + self.dtext, py + self.dtext, f)
+                self.pltlines.append(lt)
                 # Plotting lines according to tech data
         if self.line_view == 'LineType':
             for lt in colors_tech.keys():
                 for i, c in enumerate(self.tech[self.tech.Type == lt].index):
-                    plot_lines(self.lines[self.lines.Conductor == c], 
+                    l=plot_lines(self.lines[self.lines.Conductor == c], 
                                col=self.col, ax=self.ax, 
                                color=colors_tech[lt][int(i%len(colors_tech[lt]))], picker=5, label=c, linewidth=self.tech.Section[c]/50) 
+                    self.pltlines.append([l])
         # Not connected lines
         notconn = self.lines[self.lines.Connected == False]
         plot_lines(notconn, col=self.col, ax=self.ax, 
                    color='k', linestyle=':', picker=5, label='Disconnected')
+        self.pltlines.append(self.ax.collections[-1])
         # Connected but without feeder
         notassigned = self.lines[self.lines.Connected & self.lines.Feeder.isnull()]
-        plot_lines(notassigned, col=self.col, ax=self.ax, 
+        l=plot_lines(notassigned, col=self.col, ax=self.ax, 
                    color='r', linestyle=':', picker=5, label='Without feeder')
+        self.pltlines.append(self.ax.collections[-1])
         self.mainview = self.ax.axis()
         self.openlines = self.ax.add_collection(LineCollection(segments=[], gid=[], linestyle=':', color='k', picker=5))
         self.reconnected = self.ax.add_collection(LineCollection(segments=[], gid=[], linestyle='-.', color='darkgoldenrod', picker=5, label='Reconnected'))    
+
         
+    def draw_else(self):
         if self.ss is not None:
             self.ax.plot(self.ss[self.x], self.ss[self.y], '*', color='purple', markersize=10, label='SS')
             for p in self.ss.index:
@@ -780,10 +807,6 @@ class on_off_lines:
             plt.plot() # To force drawing of new legend
         self.f.legend()
         self.ax.set_title('Click on lines to switch on/off')
-        if self.currentview is not None:
-            self.ax.axis(self.currentview)
-        self.ax.set_aspect('equal')
-
     
     def onoffbt(self, event=None):
         self.lvartist.set_visible(not self.lvartist.get_visible())
@@ -797,12 +820,14 @@ class on_off_lines:
         print('\nRecomputing independent feeders')
         #Getting currentview
         self.currentview = self.ax.axis()
-        self.lines.Feeder = get_ind_feeders_nx(self.lines, self.n0, verbose=True)
+        self.lines.Feeder = get_ind_feeders_nx(self.lines[self.lines.Connected], self.n0, verbose=True)
         fs  = self.lines.Feeder.unique()
         self.feeders = np.sort([f for f in fs if f==f])
         number_init_feeders(self.lines, self.n0)
-        self.ax.clear()
-        self.draw()
+#        self.ax.clear()
+        self.remove_lines()
+        self.draw_lines()
+        self.set_view()
         self.recom_dist()
     
     def recom_dist(self, event=None):
@@ -827,8 +852,9 @@ class on_off_lines:
             return
         
         self.line_view = 'LineType' if self.line_view == 'Feeder' else 'Feeder'
-        self.ax.clear()
-        self.draw()
+        self.remove_lines()
+        self.draw_lines()
+        self.set_view()
     
     def reduce_compute_tech(self, event=None):
         """ Reduces data to only connected to main node
@@ -848,8 +874,9 @@ class on_off_lines:
         self.tech.sort_values('Section', inplace=True, ascending=False)
         
         self.line_view = 'LineType'
-        self.ax.clear()
-        self.draw()
+        self.remove_lines()
+        self.draw_lines()
+        self.set_view()
         
     def draw_off(self, idline, artist):
         # Delete off line from current artist

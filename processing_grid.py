@@ -18,7 +18,7 @@ import util
 
 #%% OPTIONAL: Load processed data
 print('Loading MV grid data')
-folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\\'
+folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\CourtenayBT\\'
 subf = r'ProcessedData//'
 hta = pd.read_csv(folder + subf + 'MVLines_full.csv', engine='python', index_col=0)
 ps = pd.read_csv(folder + subf + 'SS_full.csv', engine='python', index_col=0)
@@ -59,17 +59,23 @@ lv_iris = pd.read_csv(folder_lv+'Nb_BT_IRIS2016.csv',
 #%% Assigning Geographic zone to each LV load
 
 # Main node
-ps0 = 'Boriette'
+ps0 = 'PS7'
 n0 = ps.node[ps0]
 
-# Departement(s) of case study: To change for each case! (this is just to reduce the data size)
-dep = [19]
-polys = iris_poly[iris_poly.DEP_CODE.isin(dep)][['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
+# Reducing polygons to consider to +- 0.5 degrees of latitude/longitude to data
+dt = 0.5
+lonmin, lonmax, latmin, latmax = bt.xGPS.min(), bt.xGPS.max(), bt.yGPS.min(), bt.yGPS.max()
+polys = iris_poly[(iris_poly.Lon > lonmin-dt) &
+                  (iris_poly.Lon < lonmax+dt) &
+                  (iris_poly.Lat > latmin-dt) &
+                  (iris_poly.Lat < latmax+dt)][['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
 polys.columns = ['Name', 'Polygon', 'xGPS', 'yGPS']
 
 
 if not 'Geo_Name' in bt.columns:
     assign_polys(bt, polys)
+    if bt.Geo.isnull().sum():
+        print('Warning: there are some MV-LV transformers without assigned polygon, check input data')
 if not 'Annual_Load_MWh' in bt.columns:
     bt['Annual_Load_MWh'] = equal_total_load(bt,iris,lv_per_geo=lv_iris.Nb_BT)
 if not 'Pmax_MW' in bt.columns:
@@ -98,6 +104,7 @@ ns = unique_nodes(htared)
 fnodesred = fnodes.loc[ns]
 btred = bt[bt.node.isin(fnodesred.index)]
 psred = ps[ps.node.isin(fnodesred.index)]
+profsred = profs[btred.Geo.unique()]
 
 util.create_folder(folder + r'ProcessedData')
 print('Saving reduced data:\n\tLines: {}\n\tML/LV: {}\n\tUnique Nodes:{}'.format(len(htared), len(btred), len(ns)))
@@ -115,3 +122,5 @@ fnodes.to_csv(folder + r'ProcessedData\\' +  'Nodes_full.csv')
 try:
     profs.to_csv(folder + r'ProcessedData\\' +  'profiles_per_iris.csv')
     print('Saving IRIS profiles:\n\IRIS: {}\n\t'.format(profs.shape[1]))
+except:
+    pass
