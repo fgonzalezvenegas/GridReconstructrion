@@ -791,9 +791,10 @@ class on_off_lines:
         if self.lv is not None:
             self.lvartist = self.ax.plot(self.lv[self.x], self.lv[self.y], 'oy', markersize=5, label='MV/LV', alpha=0.5)[0]
         if self.geo is not None:
+            # Reducing Geo shapes to plot to only those in the study zone
             axis = self.ax.axis()
-            self.geo = self.geo[(axis[0]<self.geo[self.x]) & (self.geo[self.x]<axis[1]) & 
-                             (axis[2]<self.geo[self.y]) & (self.geo[self.y]<axis[3])]
+            self.geo = self.geo[((axis[0]<self.geo[self.x]) & (self.geo[self.x]<axis[1]) & 
+                             (axis[2]<self.geo[self.y]) & (self.geo[self.y]<axis[3])) | (self.geo.index.isin(self.lv.Geo))]
             # plot polys
             collection = PatchCollection([p[0] for p in self.geo.Polygon], 
                                          facecolor='none', edgecolor='k', linestyle='--', linewidth=0.8, alpha=0.8)
@@ -874,9 +875,8 @@ class on_off_lines:
         self.tech.sort_values('Section', inplace=True, ascending=False)
         
         self.line_view = 'LineType'
-        self.remove_lines()
-        self.draw_lines()
-        self.set_view()
+        self.ax.clear()
+        self.draw()
         
     def draw_off(self, idline, artist):
         # Delete off line from current artist
