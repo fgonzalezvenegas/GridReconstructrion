@@ -618,6 +618,7 @@ class on_off_lines:
                  outputfolder=''):
         self.lines = lines
         self.n0 = n0
+        self.p0 = ss[ss.node == n0].index[0]
         if (not ('Feeder' in lines.columns)):
             print('Computing independent feeders')
             self.lines['Feeder'] = get_ind_feeders_nx(lines, n0, verbose=True)
@@ -640,7 +641,7 @@ class on_off_lines:
         self.lv = lv
         self.geo = geo
         self.dist = None
-        self.recom_dist()
+        self.recompute_distance()
         self.tech = tech        # Line types tech data
         self.outputfolder = outputfolder
         if not self.tech is None:
@@ -681,18 +682,28 @@ class on_off_lines:
     
     def do_buttons(self):
         
+        # Add button to separate substations
+        axbutton = plt.axes([0.05, 0.05, 0.12, 0.075])
+        self.buttonsepss = Button(axbutton, 'Separate substations\nservice areas')
+        self.buttonsepss.on_clicked(self.auto_separation)
+        
+        # Add button to separate substations
+        axbutton = plt.axes([0.24, 0.05, 0.12, 0.075])
+        self.buttonuntang = Button(axbutton, 'Untangle\nfeeders')
+        self.buttonuntang.on_clicked(self.auto_debouclage)
+        
         # Add button to recompute feeders
-        axbutton = plt.axes([0.3, 0.05, 0.18, 0.075])
+        axbutton = plt.axes([0.43, 0.05, 0.12, 0.075])
         self.buttonf = Button(axbutton, 'Recompute\nFeeders')
         self.buttonf.on_clicked(self.recompute_feeders)
         
         # Add button to reduce data
-        axbutton = plt.axes([0.55, 0.05, 0.18, 0.075])
+        axbutton = plt.axes([0.62, 0.05, 0.12, 0.075])
         self.buttonred = Button(axbutton, 'Reduce data and\n compute tech')
         self.buttonred.on_clicked(self.reduce_compute_tech)
         
         # Add button to save data
-        axbutton = plt.axes([0.8, 0.05, 0.18, 0.075])
+        axbutton = plt.axes([0.81, 0.05, 0.12, 0.075])
         self.buttonsave = Button(axbutton, 'Save current data')
         self.buttonsave.on_clicked(self.save_data)
         
@@ -764,10 +775,10 @@ class on_off_lines:
         if self.line_view == 'LineType':
             for lt in colors_tech.keys():
                 for i, c in enumerate(self.tech[self.tech.Type == lt].index):
-                    l=plot_lines(self.lines[self.lines.Conductor == c], 
+                    plot_lines(self.lines[self.lines.Conductor == c], 
                                col=self.col, ax=self.ax, 
                                color=colors_tech[lt][int(i%len(colors_tech[lt]))], picker=5, label=c, linewidth=self.tech.Section[c]/50) 
-                    self.pltlines.append([l])
+                    self.pltlines.append(self.ax.collections[-1])
         # Not connected lines
         notconn = self.lines[self.lines.Connected == False]
         plot_lines(notconn, col=self.col, ax=self.ax, 
@@ -775,13 +786,18 @@ class on_off_lines:
         self.pltlines.append(self.ax.collections[-1])
         # Connected but without feeder
         notassigned = self.lines[self.lines.Connected & self.lines.Feeder.isnull()]
-        l=plot_lines(notassigned, col=self.col, ax=self.ax, 
+        plot_lines(notassigned, col=self.col, ax=self.ax, 
                    color='r', linestyle=':', picker=5, label='Without feeder')
         self.pltlines.append(self.ax.collections[-1])
         self.mainview = self.ax.axis()
         self.openlines = self.ax.add_collection(LineCollection(segments=[], gid=[], linestyle=':', color='k', picker=5))
+        self.pltlines.append(self.ax.collections[-1])
         self.reconnected = self.ax.add_collection(LineCollection(segments=[], gid=[], linestyle='-.', color='darkgoldenrod', picker=5, label='Reconnected'))    
-
+        self.pltlines.append(self.ax.collections[-1])
+        if len(self.f.legends) > 0:
+            self.f.legends = [] # Remove existing legend
+            plt.plot() # To force drawing of new legend
+        self.f.legend()
         
     def draw_else(self):
         if self.ss is not None:
@@ -802,11 +818,6 @@ class on_off_lines:
             if 'Name' in self.geo:
                 self.geonames = [self.ax.text(self.geo[self.x][g], self.geo[self.y][g], self.geo.Name[g],
                                               horizontalalignment='center') for g in self.geo.index]
-            
-        if len(self.f.legends) > 0:
-            self.f.legends = [] # Remove existing legend
-            plt.plot() # To force drawing of new legend
-        self.f.legend()
         self.ax.set_title('Click on lines to switch on/off')
     
     def onoffbt(self, event=None):
@@ -829,9 +840,9 @@ class on_off_lines:
         self.remove_lines()
         self.draw_lines()
         self.set_view()
-        self.recom_dist()
+        self.recompute_distance()
     
-    def recom_dist(self, event=None):
+    def recompute_distance(self, event=None):
         print('\nRecomputing distances to HV/MV substations')
         df = pd.DataFrame()
         l = self.lines[self.lines.Connected][['Length','node_i','node_e']]
@@ -877,6 +888,44 @@ class on_off_lines:
         self.line_view = 'LineType'
         self.ax.clear()
         self.draw()
+        
+    def auto_separation(self, event=None):
+        """ Automatic separation of primary substation 
+        service areas based on min distance
+        """
+        # assign each node to a SS
+        areas = self.dist.idxmin(axis=1)
+        # get nodes assigned to main SS
+        ndS0 = areas[areas == self.p0].index
+        # get nodes assigned to other SS
+        ndSx = areas[~ (areas == self.p0)].index
+        # get lines in the edge
+        ledge = self.lines[(self.lines.node_i.isin(ndS0) & self.lines.node_e.isin(ndSx)) | 
+                           (self.lines.node_i.isin(ndSx) & self.lines.node_e.isin(ndS0))].index
+        self.lines.Connected[ledge] = False
+        self.recompute_feeders()  
+
+    def auto_debouclage(self, event=None):
+        """ Automatic 'untangling' of feeders from one ss
+        """
+        # Primary nodes for each feeders
+        lfs = to_node(self.lines, self.n0)
+        nfs = new_nodes(self.lines.loc[lfs], self.n0)
+        # compute distance to each primary node
+        df = pd.DataFrame()
+        l = self.lines[self.lines.Connected][['Length','node_i','node_e']].drop(lfs)
+        for p in nfs:
+            print('\tComputing distance for {}'.format(p))
+            df = pd.concat([df,dist_to_node_nx(l, p, name=p)], axis=1)
+        # Assign each node to a Primary feeder
+        areas = df.idxmin(axis=1)
+        # get lines in the edge
+        ledge = self.lines[(~(areas[self.lines.node_i].values == areas[self.lines.node_e].values)) & 
+                           (~(areas[self.lines.node_i].isnull().values & areas[self.lines.node_e].isnull().values))].index
+        ledge = ledge.drop(lfs)
+        # assign lines in the edge as disconnected
+        self.lines.Connected[ledge] = False
+        self.recompute_feeders()           
         
     def draw_off(self, idline, artist):
         # Delete off line from current artist

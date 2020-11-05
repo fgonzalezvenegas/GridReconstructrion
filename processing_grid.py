@@ -92,7 +92,7 @@ if not ('Connected' in hta.columns):
     hta['Connected'] = True
 
 off = on_off_lines(hta, n0, ss=ps, lv=bt, GPS=True, geo=polys, 
-                   tech=tech, nodes=fnodes,
+                   tech=tech, nodes=fnodes,     
                    outputfolder=folder)
 
 
@@ -120,7 +120,8 @@ hta.to_csv(folder + r'ProcessedData\\' +  'MVLines_full.csv')
 fnodes.to_csv(folder + r'ProcessedData\\' +  'Nodes_full.csv')
 
 try:
-    profs.to_csv(folder + r'ProcessedData\\' +  'profiles_per_iris.csv')
+    profs.to_csv(folder + r'ProcessedData\\' +  'profiles_per_iris_full.csv')
+    profsred.to_csv(folder + r'ProcessedData\\' +  'profiles_per_iris.csv')
     print('Saving IRIS profiles:\n\IRIS: {}\n\t'.format(profs.shape[1]))
 except:
     pass
