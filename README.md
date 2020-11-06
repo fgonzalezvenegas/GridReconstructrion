@@ -35,10 +35,10 @@ How to use:
     Click on lines to open/close connectors and untangle the grid. When you click on lines, you get a message of distances to each substation in the console.
     Click on 'Recompute feeders' to update the view on independent feeders
     
-    Once you have all untangled:
+  Once you have all untangled:
     Click on 'Reduce data and compute tech data'. This will reduce the data to only that connected to the main Substation and define the type of conductor for each line section based on expected max load.
     
-    Save current data
+  Save current data
     
   (3) Creating PandaPower grid
   Run creating_ppgrid.py
