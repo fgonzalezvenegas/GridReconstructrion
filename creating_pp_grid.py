@@ -63,10 +63,6 @@ print('Loading Conso per IRIS')
 folder_consodata = r'c:\user\U546416\Documents\PhD\Data\Mobilité\Data_Traitee\Conso'
 iris = pd.read_csv(folder_consodata + r'\IRIS_enedis_2017.csv', 
                     engine='python', index_col=0)
-print('Loading profiles')
-profiles_all = pd.read_csv(folder_consodata + r'\conso_all_pu.csv',
-                       engine='python', index_col=0)
-profiles_all.drop(['ENT', 'NonAffecte'], axis=1, inplace=True)
 
 #%% Load pv data per departement
 folder_pv = r'c:\user\U546416\Documents\PhD\Data\Conso-Reseau\Réseau'
