@@ -18,13 +18,14 @@ import datetime
 import pandapower as pp
 import networkx as nx
 
-def dist_series_point(sx, sy, px, py):
-    """ 
-    """
-    return (sx-px)*(sx-px) + (sy-py)*(sy-py)
 
-def plot_lines(lines, col='Shape', ax=None, **plot_params):
+def plot_lines(lines, col='ShapeGPS', ax=None, **plot_params):
+    """ Plots a DataFrame containing line coordinates in column 'col'
+    """
     segs = []
+    if not (col in lines):
+        if 'Shape' in lines:
+            col='Shape'
     for i in lines[col]:
         segs.append(i)
     if ax==None:
@@ -37,6 +38,35 @@ def plot_lines(lines, col='Shape', ax=None, **plot_params):
     ax.add_collection(lc)
     ax.autoscale()
     return ax
+    
+def plot_quick(lines, lv, ss, nodes=None, GPS=False):
+    if GPS:
+        sg = 'GPS'
+        d = 0.005
+    else:
+        sg = ''
+        d = 20
+    col='Shape' + sg
+    x = 'x' + sg
+    y = 'y' + sg
+    x1 = 'x1' + sg
+    y1 = 'y1' + sg
+    x2 = 'x2' + sg
+    y2 = 'y2' + sg
+    ax=plot_lines(lines, col=col, label='Lines')
+    ax.plot(lv[x], lv[y], 'o', color='yellow', alpha=0.5, label='LV trafo')
+    ax.plot(ss[x], ss[y], '*', color='purple', markersize=10, label='Substation')
+    for s, t in ss.iterrows():
+        ax.text(t[x]+d, t[y]+d, s)
+    if nodes is None:
+        ax.plot(lines[x1], lines[y1], '.', color='k', markersize=1, label='Nodes')
+        ax.plot(lines[x2], lines[y2], '.', color='k', markersize=1, label='_')
+    else:
+        ax.plot(nodes[x], nodes[y], '.', color='k', markersize=1, label='Nodes')
+        q = get_node_to_line_segments(nodes, lines, lv, GPS=GPS)
+        plot_lines(q, linestyle='--', color='purple', col=col, ax=ax)
+    plt.legend()
+    return ax
 
 def to_node(lines, node):
     """ Returns all lines connected to a given node"""
@@ -44,7 +74,7 @@ def to_node(lines, node):
 
 def unique_nodes(lines):
     """ Returns a list of unique nodes in a list of lines """
-    return list(np.unique(list(lines.node_i.values) + list(lines.node_e.values)))
+    return list(set(lines.node_i).union(set(lines.node_e)))
 
 def new_nodes(lines, node):
     l = unique_nodes(lines)
@@ -53,42 +83,17 @@ def new_nodes(lines, node):
 
 def connected(lines, node):
     """ Returns all lines directly or indirectly connected to a given departure node """
-    nl = to_node(lines, node)
-    if len(nl)>0:
-        newnodes = new_nodes(lines.loc[nl], node)
-        for nn in newnodes:
-            nl += connected(lines.drop(nl), nn)
-    return nl
-
-#
-#def dist_to_node(lines, node, dist=None, maxd=80, name=None):
-#    """ Returns a pd.Series of with the min distance of nodes to a given Node
-#    """
-#    if dist is None:
-#        if name is None:
-#            name=node
-#        dist = pd.Series(index=unique_nodes(lines), dtype=float, name=name)
-#    if not dist[node] == dist[node]:
-#        dist[node] = 0 
-#    d0 = dist[node]
-#    # Lines coming to node 
-#    nl = to_node(lines, node) 
-#    if len(nl)>0:
-#        # Iterating over lines
-#        for l in nl:
-#            # Get other node and new tentative distance
-#            nout = lines.node_e[l] if lines.node_i[l] == node else lines.node_i[l]
-#            nd = lines.Length[l] + d0
-#            if nd < maxd*1000: #Max distance set at maxd km, useful to keep computing time reduced
-#                if not (dist[nout] <= nd):
-#                    # If tentative distance is less (or new), it updates the data
-#                    dist[nout] = nd
-#                    # Compute new distances from this new node, 
-#                    # this will modify the pd.Series dist inplace
-#                    dist_to_node(lines.drop(l), nout, dist=dist)
-#                    # dist = pd.DataFrame([dist,dist2]).T.min(axis=1)
-#    return dist
-
+    # create nx graph
+    g = nx.Graph()
+    for l,t in lines.iterrows():
+        g.add_edge(t.node_i, t.node_e)
+    # compute connected elements
+    cc = list(nx.connected_components(g))
+    # check for connected elements to node
+    for c in cc:
+        if node in c:
+            return list(lines[lines.node_i.isin(c) | lines.node_e.isin(c)].index)
+    
 def dist_to_node_nx(lines, n0, name='name'):
     """ Returns a pd.Series of with the min distance of nodes to a given Node
     Uses networkx, djistra min dist, super fast!
@@ -99,43 +104,6 @@ def dist_to_node_nx(lines, n0, name='name'):
         g.add_edge(t.node_i, t.node_e, weight=t.Length)
     d = pd.Series(nx.single_source_dijkstra_path_length(g, n0), name=name)
     return d.sort_index()
-#        
-#    
-#def get_ind_feeders(lines, n0, verbose=False):
-#    """ Returns a list of independent feeder connected to the Main SS (n0)"""
-#    # Lines connected to main node
-#    ls = to_node(lines, n0)
-#    # Sub-dataframe of lines, without the first lines connected to main node
-#    l_ = lines[lines.Connected].drop(ls)
-#    # New 'initial nodes'
-#    nn = new_nodes(lines.loc[ls], n0)
-#    feeder = pd.Series(index=lines.index, dtype=str)
-#
-#    if verbose:
-#        print('Initial feeders = {}'.format(len(nn)))
-#    nfs = 0
-#    # For each initial feeder, comupte all lines connected to it
-#    for i, n in enumerate(nn):
-#        if verbose:
-#            print('\tFeeder {}'.format(i))
-#        # check if first line already is in one subset:
-#        l0  = to_node(l_, n)[0]
-#        if feeder[l0] == feeder[l0]:
-#            continue
-#        
-#        # Lines connected to node 'n'
-#        c = connected(l_, n)
-#        feeder[c] = 'F{:02d}'.format(nfs)
-#        nfs += 1
-#    # Add first lines to each feeder
-#    for l in ls:
-#        n = lines.node_i.loc[l] if lines.node_i.loc[l] != n0 else lines.node_e.loc[l]
-#        l2 = to_node(l_, n)[0]
-#        feeder[l] = feeder[l2]
-#            
-#    if verbose:
-#        print('Finished computing indepentent feeder, Total={}'.format(nfs))
-#    return feeder
 
 def get_ind_feeders_nx(lines, n0, verbose=False):
     """ Returns a list of independent feeder connected to the Main SS (n0)"""
@@ -194,6 +162,50 @@ def get_coord_node(lines, node, GPS=True):
     cols = ['xGPS', 'yGPS'] if GPS else ['x', 'y']
     return u[cols].iloc[0]
 
+def get_node_to_line_segments(nodes, lines, lv=None, GPS=True):
+    """ returns a pd.DataFrame of segments that rely nodes to lines
+    """
+    if GPS:
+        colpoint='xyGPS'
+        col = 'ShapeGPS'
+        colline1 = 'xy1GPS'
+        colline2 = 'xy2GPS'
+    else:
+        col ='Shape'
+        colpoint ='Shape'
+        colline1 = 'xy1'
+        colline2 = 'xy2'
+    # getting node coordinates for each line extreme
+    fi = nodes[colpoint][lines.node_i]
+    fe = nodes[colpoint][lines.node_e]
+    fi.index = lines.index
+    fe.index = lines.index
+    # reformating
+    shape1 = lines[colline1]
+    shape2 = lines[colline2]
+    # defining segments as [(xnode, ynode), (xline(node), yline(node))]
+    segi = fi.apply(lambda x: [x]) + shape1.apply(lambda x: [x]) 
+    sege = fe.apply(lambda x: [x]) + shape2.apply(lambda x: [x]) 
+    # removing segments of length null
+    segi = segi[~(fi==shape1)]
+    sege = sege[~(fe==shape2)]
+    # appending to output
+    segs = pd.concat([segi, sege], ignore_index=True)
+    # doing the same for LV trafos
+    if not (lv is None):
+        fl = nodes[colpoint][lv.node]
+        fl.index = lv.index
+        segl = fl.apply(lambda x: [x]) + lv[colpoint].apply(lambda x: [x])
+        segl = segl[~(fl==lv[colpoint])]
+        segs = pd.concat([segs,segl], ignore_index=True)
+    return pd.DataFrame(segs, columns=['Shape'])
+
+def assign_feeder_to_node(nodes, n0, lines):
+    nodes['Feeder'] = ''
+    for f in lines.Feeder.unique():
+        nodes.Feeder[unique_nodes(lines[lines.Feeder == f])] = f
+    nodes.Feeder[n0] = '0SS'
+    
 def rename_nodes(nodes, n0, lines, lv, ss):
     """ Rename the nodes according to Feeder appartenance and distance to main node
     New index is just ascending numeric
@@ -201,32 +213,27 @@ def rename_nodes(nodes, n0, lines, lv, ss):
     Updates relations to lines node_i, node_e; lv and ss
     """
     nodes['d'] = ((nodes.xGPS[n0]-nodes.xGPS)**2+(nodes.yGPS[n0]-nodes.yGPS)**2)
-    nodes['Feeder'] = ''
-
-    for f in lines.Feeder.unique():
-        nodes.Feeder[unique_nodes(lines[lines.Feeder == f])] = f
-    nodes.Feeder[n0] = '0SS'
+    assign_feeder_to_node(nodes, n0, lines)
     # Sorting nodes
     nodes.sort_values(['Feeder', 'd'], inplace=True)
     # Creating new index
     nodes.reset_index(inplace=True)
+    #Renames nodes
+    nodes.index = 'N'+ nodes.index.astype(str)
     # Get relationship old index-new index
     old_new = pd.Series(index=nodes['index'], data=nodes.index)
     
-    #Update relationship
+    #Update relationship to lines and trafos
     lines.node_i = old_new[lines.node_i].values
     lines.node_e = old_new[lines.node_e].values
     lv.node = old_new[lv.node].values
     ss.node = old_new[ss.node].values 
-    
-    #Adds new name
-    nodes['name'] = ['N'+str(i)+'_'+nodes.Feeder[i] for i in nodes.index]
+    # drops old index
     nodes.drop('index', axis=1, inplace=True)
     
 def rename_lines(lines, n0):
     """ Rename lines according to Feeder and distance to main node
-    New index is just ascending numeric
-    Adds new column 'name' with a meaningful name
+    Name (index) considers number and feeder meaningful name
     """
     # Computing distance to main node
     l = lines.loc[to_node(lines,n0)[0]]
@@ -241,7 +248,7 @@ def rename_lines(lines, n0):
     lines.reset_index(inplace=True, drop=True)
     # Renaming lines
     #Adds new name
-    lines['name'] = ['L'+str(i)+'_'+lines.Feeder[i] for i in lines.index]
+    lines.index = ['L'+str(i)+'_'+lines.Feeder[i] for i in lines.index]
     
     
     
@@ -613,7 +620,7 @@ colors_tech = {'Underground' : ['maroon', 'red', 'orangered', 'salmon', 'khaki']
 class on_off_lines:
     
     def __init__(self, lines, n0, nodes=None, ax=None, ss=None, 
-                 lv=None, geo=None, GPS=False, tech=None,
+                 lv=None, geo=None, GPS=True, tech=None,
                  profiles=None,
                  outputfolder=''):
         self.lines = lines
@@ -676,6 +683,9 @@ class on_off_lines:
         
         self.draw()
         
+        self.drawn_nodes = False
+        self.names = False
+        
         self.cid = self.f.canvas.mpl_connect('pick_event', self.set_on_off)
         self.ncalls = 0
         self.lastevent = []
@@ -687,7 +697,7 @@ class on_off_lines:
         self.buttonsepss = Button(axbutton, 'Separate substations\nservice areas')
         self.buttonsepss.on_clicked(self.auto_separation)
         
-        # Add button to separate substations
+        # Add button to untangle feeders
         axbutton = plt.axes([0.24, 0.05, 0.12, 0.075])
         self.buttonuntang = Button(axbutton, 'Untangle\nfeeders')
         self.buttonuntang.on_clicked(self.auto_debouclage)
@@ -712,15 +722,25 @@ class on_off_lines:
         self.buttona = Button(axbutton, 'Toggle\nAspect')
         self.buttona.on_clicked(self.aspect)
         
+        # Add button to draw names
+        axbutton = plt.axes([0.65,0.905,0.05,0.05])
+        self.buttonms = Button(axbutton, 'Write\nnames')
+        self.buttonms.on_clicked(self.onoff_names)
+        
+        # Add button to draw nodes
+        axbutton = plt.axes([0.32,0.905,0.1,0.05])
+        self.buttonnds = Button(axbutton, 'On/Off Nodes')
+        self.buttonnds.on_clicked(self.onoff_nodes)
+        
         # Add button to toggle on/off visibility of bt and geo:
         if self.lv is not None:
-            axbuttonbt = plt.axes([0.15, 0.905, 0.1, 0.05])
+            axbuttonbt = plt.axes([0.06, 0.905, 0.1, 0.05])
             self.buttonlv = Button(axbuttonbt,'On/Off MV/LV')
-            self.buttonlv.on_clicked(self.onoffbt)
+            self.buttonlv.on_clicked(self.onoff_lv)
         if self.geo is not None:
-            axbuttongeo = plt.axes([0.30, 0.905, 0.1, 0.05])
+            axbuttongeo = plt.axes([0.19, 0.905, 0.1, 0.05])
             self.buttongeo = Button(axbuttongeo,'On/Off GeoShapes')
-            self.buttongeo.on_clicked(self.onoffgeo)
+            self.buttongeo.on_clicked(self.onoff_geo)
             
          # Add button to plot according to tech data
         axbutton = plt.axes([0.45, 0.905, 0.1, 0.05])
@@ -758,7 +778,7 @@ class on_off_lines:
     def draw_lines(self):
         self.pltlines = []
         if self.line_view == 'Feeder':
-            # Better way might be to just turn on/off these artists
+            # Plotting each feeder a different color
             for i, f in enumerate(self.feeders):
                 plot_lines(self.lines[(self.lines.Feeder==f) & (self.lines.Connected) & (self.lines.Type == 'Underground')], 
                                       col=self.col, ax=self.ax, 
@@ -768,10 +788,10 @@ class on_off_lines:
                                       col=self.col, ax=self.ax, 
                                       color=colors[int(i%len(colors))], picker=5, linewidth=1)
                 self.pltlines.append(self.ax.collections[-1])
-                px, py = get_farther(self.ss[self.ss.node == self.n0].iloc[0], self.lines[self.lines.Feeder == f])
+                px, py = get_farther(self.ss[self.ss.node == self.n0].iloc[0], self.nodes.loc[unique_nodes(self.lines[self.lines.Feeder == f])])
                 lt = self.ax.text(px + self.dtext, py + self.dtext, f)
                 self.pltlines.append(lt)
-                # Plotting lines according to tech data
+        # Plotting lines according to tech data
         if self.line_view == 'LineType':
             for lt in colors_tech.keys():
                 for i, c in enumerate(self.tech[self.tech.Type == lt].index):
@@ -819,15 +839,54 @@ class on_off_lines:
                 self.geonames = [self.ax.text(self.geo[self.x][g], self.geo[self.y][g], self.geo.Name[g],
                                               horizontalalignment='center') for g in self.geo.index]
         self.ax.set_title('Click on lines to switch on/off')
-    
-    def onoffbt(self, event=None):
-        self.lvartist.set_visible(not self.lvartist.get_visible())
         
-    def onoffgeo(self, event=None):
+    
+    def draw_nodes(self):
+        # drawing nodes
+        self.node_artist = self.ax.plot(self.nodes[self.x], self.nodes[self.y], 
+                                        'o', color='k', markersize=4, alpha=0.5, label='Nodes')[0]
+        # drawing lines to nodes:
+        ls = get_node_to_line_segments(self.nodes, self.lines, self.lv)
+        plot_lines(ls, col=self.col, ax=self.ax, 
+                   color='purple', linestyle='--', label='_', linewidth=1) 
+        self.nodeline_artist = self.ax.collections[-1]        
+        
+    def plot_names(self):
+        self.nodenames = [self.ax.text(t[self.x], t[self.y], n, horizontalalignment='center') 
+                          for n, t in self.nodes.iterrows()]
+        self.linenames = [self.ax.text(t[self.x], t[self.y], n, horizontalalignment='center') 
+                          for n, t in self.lines.iterrows()]
+        self.lvnames = [self.ax.text(t[self.x], t[self.y], n, horizontalalignment='center') 
+                          for n, t in self.lv.iterrows()]
+    
+    def erase_names(self):
+        for i in self.nodenames: i.remove()
+        for i in self.linenames: i.remove()
+        for i in self.lvnames: i.remove()
+        
+        
+    def onoff_lv(self, event=None):
+        self.lvartist.set_visible(not self.lvartist.get_visible())
+    
+    def onoff_geo(self, event=None):
         self.geoartist.set_visible(not self.geoartist.get_visible())
         for gn in self.geonames:
             gn.set_visible(not gn.get_visible())
     
+    def onoff_nodes(self, event=None):
+        if hasattr(self, 'node_artist'):
+            self.node_artist.set_visible(not self.node_artist.get_visible())
+            self.nodeline_artist.set_visible(not self.nodeline_artist.get_visible())
+        else:
+            self.draw_nodes()
+        
+    def onoff_names(self, event=None):
+        self.names = not self.names
+        if self.names:
+            self.plot_names()
+        else:
+            self.erase_names()
+            
     def recompute_feeders(self, event=None):
         print('\nRecomputing independent feeders')
         #Getting currentview
@@ -881,7 +940,12 @@ class on_off_lines:
         self.nodes = self.nodes.loc[ns]
         self.lv = self.lv[self.lv.node.isin(self.nodes.index)]
         self.ss = self.ss[self.ss.node.isin(self.nodes.index)]
-        
+        # Renaming data
+        rename_nodes(self.nodes, self.n0, self.lines, self.lv, self.ss)
+        rename_lines(self.lines, self.n0)
+        # get new main node
+        self.n0 = self.ss.node[self.p0]
+        # Assigning tech data
         self.lines['Conductor'] = assign_tech_line(self.lines, self.lv, self.n0, self.tech)
         self.tech.sort_values('Section', inplace=True, ascending=False)
         
@@ -910,19 +974,21 @@ class on_off_lines:
         """
         # Primary nodes for each feeders
         lfs = to_node(self.lines, self.n0)
-        nfs = new_nodes(self.lines.loc[lfs], self.n0)
         # compute distance to each primary node
         df = pd.DataFrame()
-        l = self.lines[self.lines.Connected][['Length','node_i','node_e']].drop(lfs)
-        for p in nfs:
+        for p in lfs:
+            other_lines = list(lfs)
+            other_lines.remove(p)
+            l = self.lines[self.lines.Connected][['Length','node_i','node_e']].drop(other_lines)
             print('\tComputing distance for {}'.format(p))
-            df = pd.concat([df,dist_to_node_nx(l, p, name=p)], axis=1)
+            df = pd.concat([df,dist_to_node_nx(l, self.n0, name=p)], axis=1)
         # Assign each node to a Primary feeder
         areas = df.idxmin(axis=1)
+        areas[self.n0] = 'SS'
         # get lines in the edge
         ledge = self.lines[(~(areas[self.lines.node_i].values == areas[self.lines.node_e].values)) & 
                            (~(areas[self.lines.node_i].isnull().values & areas[self.lines.node_e].isnull().values))].index
-        ledge = ledge.drop(lfs)
+        ledge = ledge.drop(lfs, errors='ignore')
         # assign lines in the edge as disconnected
         self.lines.Connected[ledge] = False
         self.recompute_feeders()           

@@ -25,6 +25,7 @@ import datetime as dt
 
 from ppgrid import *
 from grid import *
+import VoltVar
 
 #%% OPTIONAL: Load processed data
 print('Loading MV grid data')
@@ -36,7 +37,7 @@ lv = pd.read_csv(folder + subf + 'MVLV.csv', engine='python', index_col=0)
 nodes = pd.read_csv(folder + subf + 'Nodes.csv', engine='python', index_col=0)
 
 lines.ShapeGPS = lines.ShapeGPS.apply(eval)
-nodes.ShapeGPS = nodes.ShapeGPS.apply(eval)
+nodes.xyGPS = nodes.xyGPS.apply(eval)
 
 
 folder_profiles = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\Profiles\\'
@@ -56,13 +57,16 @@ folder_iris = r'c:\user\U546416\Documents\PhD\Data\DataGeo\\'
 file_iris = 'IRIS_all_geo_'+str(2016)+'.csv'
 iris_poly = pd.read_csv(folder_iris+file_iris,
                         engine='python', index_col=0)
-iris_polygons = pd.Series(util.do_polygons(iris_poly, plot=False))
 print('\tDone loading polygons')
 #%% OPTIONAL: Load conso data
 print('Loading Conso per IRIS')
 folder_consodata = r'c:\user\U546416\Documents\PhD\Data\Mobilité\Data_Traitee\Conso'
 iris = pd.read_csv(folder_consodata + r'\IRIS_enedis_2017.csv', 
                     engine='python', index_col=0)
+print('Loading profiles')
+profiles_all = pd.read_csv(folder_consodata + r'\conso_all_pu.csv',
+                       engine='python', index_col=0)
+profiles_all.drop(['ENT', 'NonAffecte'], axis=1, inplace=True)
 
 #%% Load pv data per departement
 folder_pv = r'c:\user\U546416\Documents\PhD\Data\Conso-Reseau\Réseau'
@@ -70,12 +74,26 @@ dep_parc_prod = pd.read_csv(folder_pv + r'\parc-pv-departement.csv',
                             engine='python', sep=',')
 pv_dep = dep_parc_prod.groupby(['DEP_CODE', 'TYPE_PV']).P_MW.sum()
 
+#% load number of LV trafos per iris
+folder_lv = r'c:\user\U546416\Documents\PhD\Data\Conso-Reseau\Réseau\\'
+lv_iris = pd.read_csv(folder_lv+'Nb_BT_IRIS2016.csv',
+                      engine='python', index_col=0)
+
+
 #%% showing data
 n0 = ss.node.iloc[0]
-#dep = 19
-polys = iris_poly[['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
+# Reducing polygons to consider to +- 0.5 degrees of latitude/longitude to data
+dt = 0.5
+lonmin, lonmax, latmin, latmax = nodes.xGPS.min(), nodes.xGPS.max(), nodes.yGPS.min(), nodes.yGPS.max()
+polys = iris_poly[(iris_poly.Lon > lonmin-dt) &
+                  (iris_poly.Lon < lonmax+dt) &
+                  (iris_poly.Lat > latmin-dt) &
+                  (iris_poly.Lat < latmax+dt)][['IRIS_NAME', 'Polygon', 'Lon', 'Lat']]
 polys.columns = ['Name', 'Polygon', 'xGPS', 'yGPS']
-polys.Polygon = iris_polygons
+polys.Polygon = pd.Series(util.do_polygons(polys, plot=False))
+
+
+#plot_quick(lines, lv, ss, nodes, GPS=True)
 
 off = on_off_lines(lines, n0, ss=ss, lv=lv, GPS=True, geo=polys, tech=tech, nodes=nodes)
 
@@ -86,20 +104,12 @@ v = util.input_y_n('Do you want to create the grid from loaded data (Y) or load 
 if v in ['Y', 'y', True]:
     print('\tCreating grids')
     n0 = ss.node.iloc[0]
-    rename_nodes(nodes, n0, lines, lv, ss)
-    n0 = 0
-    rename_lines(lines, n0)
-    #%% Create grid
+    #% Create grid
     print('\t\tCreating base grid')
     net = create_pp_grid(nodes, lines, tech, lv, n0=0, 
                         hv=True, ntrafos_hv=2, vn_kv=20,
-                        tanphi=0.3, verbose=True)
-    
-    bext = net.ext_grid.bus[0]
-    trafo_ss = net.trafo[net.trafo.hv_bus == bext].index[0]
-    
-    # Add tap changer controller at MV side of SS trafo
-    ppc.DiscreteTapControl(net, trafo_ss, 0.99, 1.01, side='lv')
+                        tanphi=0.3, hv_trafo_controller=True,
+                        verbose=True)
     
     # Check connectedness
     # Check unsupplied buses from External grid
@@ -111,7 +121,7 @@ if v in ['Y', 'y', True]:
         print('There are Non supplied buses!')
     
     print('Running')
-    t = time.time()
+    t = time()
     pp.runpp(net, run_control=True)
     print('Run! dt={:.2f}'.format(time.time()-t))
     plot_v_profile(net)
@@ -142,10 +152,7 @@ if v in ['Y', 'y', True]:
     # Region of net
     reg = int(iris.REGION_CODE[ies].unique()[0])
     ies_reg = iris[iris.REGION_CODE == reg].index
-    # load # BT/iris:
-    folder_lv = r'c:\user\U546416\Documents\PhD\Data\Conso-Reseau\Réseau\\'
-    lv_iris = pd.read_csv(folder_lv+'Nb_BT_IRIS2016.csv',
-                          engine='python', index_col=0)
+    
     # PV growth factor
     national_target = 35000 # MW of PV installed
     current_pv = dep_parc_prod.P_MW.sum() * 1.2 # times 1.2 because i only have Enedis data
@@ -249,6 +256,8 @@ c_t = {'A':'r', 'D':'gray', 'Z':'g', 'H':'b'}
 colors = [c_t[iris_poly.IRIS_TYPE[i]] for i in ies]
 ax=util.plot_polygons(pls, color=colors)
 plot_lines(lines, col='ShapeGPS', ax=ax, color='k', linewidth=0.5)
+nodes_farms = net_res.sgen[net_res.sgen.type=='Farm_PV'].bus
+plt.plot(net_res.bus_geodata.x[nodes_farms],net_res.bus_geodata.y[nodes_farms],'Xr', markersize=5, label='PV farms')
 util.do_labels(['Activité', 'Divers', 'Rural', 'Habitation'], list(c_t.values()), ax=ax)
 plt.title('Type IRIS')
 
@@ -285,7 +294,7 @@ plt.legend()
 v = util.input_y_n('Do you want to save grids created grids?')
 if v in ['Y', 'y', True]:
     pp.to_json(net, folder + r'PPGrid/base_grid.json')
-    pp.to_json(net_res, folder + r'PPGrid/res_grid.json')
+    pp.to_json(net_res, folder + r'PPGrid/res_grid_voltvar.json')
 
 #%% Run base grid time series
 v = util.input_y_n('Run base grid time series?')
@@ -377,14 +386,19 @@ sfarm_idx = net_res.sgen[net_res.sgen.p_mw>0.5].index
 profiler_res.add_profile_idx(element='sgen', idx=sroof_idx, variable='scaling', profile='solar_roof')
 profiler_res.add_profile_idx(element='sgen', idx=sfarm_idx, variable='scaling', profile='solar_farm')
     
+# Adding VoltVar controllers to Farms PV
+voltvars = []
+farms = net_res.sgen[net_res.sgen.type=='Farm_PV'].index
+for i in farms:
+    voltvars.append(VoltVar.VoltVar(net_res, i, level=1))
     
 #%% Setting iterator and run simulation for RES net
 v = util.input_y_n('Run RES grid time series?')
 if v in ['Y', 'y', True]:
     time_steps=profiler_res.profiles_db.index
-    iterator = Iterator(net=net_res, profiler=profiler_res)
+    iterator = Iterator(net=net_res, profiler=profiler_res, feeder_pq=True)
     folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\\'
-    of = folder + r'\Results_PV'
+    of = folder + r'\Results_PV_voltvar'
     # Run
     iterator.iterate(time_steps=time_steps, save=True, outputfolder=of, ultraverbose=False)
 
@@ -395,7 +409,11 @@ if v in ['Y', 'y', True]:
     farther_bus = pd.Series(index=[i for i in net.bus.zone.unique() if not i is None])
     d = dist_to_node_nx(lines, n0)
     for i in farther_bus.index:
-        farther_bus[i] = int(d[net.bus[net.bus.zone == i].index].idxmax())
+        try:
+            farther_bus[i] = int(d[net.bus[net.bus.zone == i].index].idxmax())
+        except:
+            farther_bus[i] = net.bus[net.bus.zone == i].index.max()    
+                
     # Critical feeders
     fs = ['0SS', 'F06', 'F16', 'F17', 'F18', 'F19']
     critday = iterator.ow.res_v.min(axis=1).idxmin()
@@ -434,8 +452,8 @@ if v in ['Y', 'y', True]:
         
     # Net load at transformer - May and February
     f, ax = plt.subplots()
-    ax.plot(np.arange(0,2*24*7), iterator.ow.global_res.TrafoOut_MW[24*2*(31+19):24*2*(31+26)], label='February')
-    ax.plot(np.arange(0,2*24*7), iterator.ow.global_res.TrafoOut_MW[24*2*(31+28+31+30+6):24*2*(31+28+31+30+13)], label='May')
+    ax.plot(np.arange(0,2*24*7), iterator.ow.global_res.TrafoOut_MW[24*2*(31+18):24*2*(31+25)], label='February')
+    ax.plot(np.arange(0,2*24*7), iterator.ow.global_res.TrafoOut_MW[24*2*(31+28+31+30+5):24*2*(31+28+31+30+12)], label='May')
     plt.axhline(y=0, linestyle='--', color='gray', linewidth=0.8)
     plt.xlim(0,48*7)
     plt.title('Net load at transformer for a given week')
