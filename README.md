@@ -15,11 +15,8 @@ How to use:
   You should download Enedis GIS data from https://www.enedis.fr/cartographie-des-reseaux-denedis
   Use tools to select the area of interest and download Substations, MV Overhead and Underground lines and LV substations
   
-  Run graph_reconstruction.py file.
+  Functions from graph_reconstruction.py file allows to read, format and reconstruct the graph of Nodes and Lines.
   
-  This script will create a connected graph of Nodes and Lines
-  It will save files of Nodes, MV lines, and Load Nodes (i.e. LV substations)
- 
  *Note: sometimes the files downloaded from enedis site appear to be corrupted and are not well read by python. 
     Open and re-save them in Excel to solve this issue
   
@@ -29,7 +26,10 @@ How to use:
   - Load profiles
   - Technical data
   - IRIS contours (polygons)
-  - Processed graph data from (1)
+  
+  In first instance, this script will create a connected graph of Nodes and Lines based on Enedis GIS data (from (1))
+  It will save files of Nodes, MV lines, and Load Nodes (i.e. LV substations)
+  Alternatively, you can load a pre-processed graph data
   
   Once everything is loaded, it'll open a python screen that shows your graph data.
     Click on lines to open/close connectors and untangle the grid. When you click on lines, you get a message of distances to each substation in the console.
