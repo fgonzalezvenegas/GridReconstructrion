@@ -50,8 +50,8 @@ lv_iris = pd.read_csv(folder_lv+'Nb_BT_IRIS2016.csv',
 #%% Either load pre-processed grid or create one from Enedis raw data
 
 print('Loading MV grid data')
-folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Courtenay\\'
-folder_output = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Courtenay\\'
+folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\\'
+folder_output = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\\'
 
 v = util.input_y_n('Do you want to create graph from GIS data (Y) or load processed grid (N):')
     
@@ -67,11 +67,6 @@ else:
 
 
 #%% Assigning Geographic zone to each node and LV load
-
-# Main node
-ps0 = 'SS0'
-print('Check main substation: current choice {}!'.format(ps0))
-n0 = ps.node[ps0]
 
 # Reducing polygons to consider to +- 0.5 degrees of latitude/longitude to data
 dt = 0.5
@@ -103,9 +98,14 @@ if not 'Pmax_MW' in bt.columns:
     bt['Pmax_MW'] = bt.Annual_Load_MWh * (power_factor[bt.Geo]).values
 
 
-#%% Compute independent feeders, open plot to define open/closed lines, compute tech data (if needed), and save
+    #%% Compute independent feeders, open plot to define open/closed lines, compute tech data (if needed), and save
 if not ('Connected' in hta.columns):
     hta['Connected'] = True
+
+# Main node
+ps0 = 'SS3'
+print('Check main substation: current choice {}!'.format(ps0))
+n0 = ps.node[ps0]
 
 off = on_off_lines(hta, n0, ss=ps, lv=bt, GPS=True, geo=polys, 
                    tech=tech, nodes=nodes,     

@@ -970,11 +970,12 @@ class on_off_lines:
         self.nodes = self.nodes.loc[ns]
         self.lv = self.lv[self.lv.node.isin(self.nodes.index)]
         self.ss = self.ss[self.ss.node.isin(self.nodes.index)]
-        # Renaming data
+        # Renaming nodes
         rename_nodes(self.nodes, self.n0, self.lines, self.lv, self.ss)
-        rename_lines(self.lines, self.n0)
         # get new main node
         self.n0 = self.ss.node[self.p0]
+        # rename lines
+        rename_lines(self.lines, self.n0)
         # Assigning tech data
         self.lines['Conductor'] = assign_tech_line(self.lines, self.lv, self.n0, self.tech)
         self.tech.sort_values('Section', inplace=True, ascending=False)
