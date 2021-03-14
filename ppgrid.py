@@ -143,7 +143,7 @@ def add_res_pv_rooftop(net, pv_penetration, iris_data, pv_cap_kw=4,
     if (lv_per_geo is None):
         if ('n_trafo_iris' in net.load):
             lv_per_geo = net.load.ntrafo_iris
-            lv_per_geo.index = net.load.name
+            lv_per_geo.index = net.load.zone
         else:
             print('No data of number of LV trafos per IRIS')
             return
@@ -152,7 +152,7 @@ def add_res_pv_rooftop(net, pv_penetration, iris_data, pv_cap_kw=4,
     npvs = 0
     for i, t in net.load.loc[loads].iterrows():
         b = t.bus
-        iris = t['name']
+        iris = t.zone
         # Share of MW at each LV transfo
         n_trafos = lv_per_geo[iris]
         # number of PV

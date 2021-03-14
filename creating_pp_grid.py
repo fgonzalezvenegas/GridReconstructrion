@@ -123,7 +123,7 @@ if v in ['Y', 'y', True]:
     print('Running')
     t = time()
     pp.runpp(net, run_control=True)
-    print('Run! dt={:.2f}'.format(time.time()-t))
+    print('Run! dt={:.2f}'.format(time()-t))
     plot_v_profile(net)
     plt.title('Voltage profile')
     
@@ -134,19 +134,15 @@ if v in ['Y', 'y', True]:
     net_res = create_pp_grid(nodes, lines, tech, lv, n0=0, 
                             hv=True, ntrafos_hv=2, vn_kv=20,
                             tanphi=0.3, verbose=True)
+
     
-    bext = net_res.ext_grid.bus[0]
-    trafo_ss = net_res.trafo[net_res.trafo.hv_bus == bext].index[0]
-    
-    # Add tap changer controller at MV side of SS trafo
-    ppc.DiscreteTapControl(net_res, trafo_ss, 0.99, 1.01, side='lv')
     # IRIS in the net
-    ies = net_res.load.name.unique()
+    ies = net_res.load.zone.unique()
     
     if not 'iris' in net_res.bus:
         if not 'Geo' in nodes:
             assign_polys(nodes, polys)
-        net_res.bus['iris'] = nodes.Geo
+        net_res.bus['iris'] = list(nodes.Geo.values) + [0]
         
     # ADDING PV
     # Region of net
@@ -184,11 +180,11 @@ if v in ['Y', 'y', True]:
              (iris.Conso_Industrie // industry_threshold).round(decimals=0) + 
              iris.Nb_Agriculture * agri_multiplier)
     # target MW of SS based on Ratio of potential sites in SS vs region
-    ncomm_ss = ncomm[ies] * net_res.load.name.value_counts() / lv_iris.Nb_BT[ies]
+    ncomm_ss = ncomm[ies] * net_res.load.zone.value_counts() / lv_iris.Nb_BT[ies]
     target_comm = pv_reg[reg, 'commercial_rooftop'] * ncomm_ss.sum() / ncomm[ies_reg].sum()
     
     # Random buses to be selected to host commercial PV
-    buses = np.concatenate([np.random.choice(net_res.load[net_res.load['name'] == i].bus, 
+    buses = np.concatenate([np.random.choice(net_res.load[net_res.load.zone == i].bus, 
                                              size=int(round(ncomm_ss[i],0)))
                             for i in ncomm_ss.index])      
     add_random_pv_rooftop(net_res, mean_size=pv_comm_cap, std_dev=pv_comm_cap/6, 
@@ -197,9 +193,11 @@ if v in ['Y', 'y', True]:
     # Add solar farms
     # Target MW of solar farms based on ratio of Rural communes / total communes in the region
     pv_farm_cap = 2 #MW
-    ncommunes_region = len(iris.loc[ies_reg][iris.IRIS_TYPE == 'Z'].COMM_CODE.unique())
+    # Number of rural communes in the region
+    ncommunes_region = iris.loc[ies_reg][iris.IRIS_TYPE[ies_reg] == 'Z'].COMM_CODE.nunique()
     # We'll put the solar farms far from the center of the city, only in rural IRIS
-    ies_rural = iris.loc[ies][iris.IRIS_TYPE == 'Z'].index
+    # number of rural communes in the studies area
+    ies_rural = iris.loc[ies][iris.IRIS_TYPE[ies] == 'Z'].index
     ncommunes_SS = len(iris.COMM_CODE[ies_rural].unique())
     target_farms = pv_reg[reg, 'solar_farm'] * ncommunes_SS / ncommunes_region
     # Selecting buses of rural communes        
@@ -220,7 +218,7 @@ else:
 
 #%% Compute PV inst cap per IRIS // energy produced
 
-ies = net_res.load.name.unique()
+ies = net_res.load.zone.unique()
 
 # Compute installed RES per IRIS
 conso_prod_iris = {}
@@ -234,7 +232,7 @@ for i in net_res.bus.iris.unique():
 conso_prod_iris = pd.DataFrame(conso_prod_iris, index=['Conso_MWh', 'PV_Home_MW','PV_Commercial_MW', 'PV_farm_MW']).T      
 
 # Plot installed PV per IRIS
-pls = util.list_polygons(iris_polygons, ies)
+pls = util.list_polygons(polys.Polygon, ies)
 f, axs = plt.subplots(1,3)
 cmap = plt.get_cmap('plasma')
 for i, ax in enumerate(axs):
@@ -243,6 +241,9 @@ for i, ax in enumerate(axs):
     util.plot_polygons(pls, ax=ax, color=colors, alpha=0.8)
     plot_lines(lines, col='ShapeGPS', ax=ax, color='k', linewidth=0.5)
     ax.set_title('{}\nTotal {:.1f} MW'.format(conso_prod_iris.columns[i+1], conso_prod_iris.iloc[:,i+1].sum()))
+f.set_size_inches(12.04,   4.76)
+f.tight_layout()
+
 # TODO: add legend
 dv_pv = np.round(maxpv/0.5,0)*0.5
 tranches = np.arange(0,maxpv+0.1, maxpv/7)
@@ -263,11 +264,11 @@ plt.title('Type IRIS')
 
 # Plot share of PV per feeder
 plt.subplots()
-fs = [f for f in net_res.bus.zone.unique() if (f==f and (not (f is None)))]
+fs = [f for f in net_res.bus.Feeder.unique() if (f==f and (not (f is None)))]
 fs = np.sort(fs)
 load_pv_feeder = {}
 for f in fs:
-    bs = net_res.bus[net_res.bus.zone == f].index
+    bs = net_res.bus[net_res.bus.Feeder == f].index
     load_pv_feeder[f] = {'load': net_res.load[net_res.load.bus.isin(bs)].p_mw.sum(),
                   'PV_gen': net_res.sgen[net_res.sgen.bus.isin(bs)].p_mw.sum()}
 load_pv_feeder = pd.DataFrame(load_pv_feeder).T
@@ -301,14 +302,14 @@ v = util.input_y_n('Run base grid time series?')
 if v in ['Y', 'y', True]:
     # Creating profiler
     profiler = Profiler(net=net, profiles_db=profiles_load)
-    for n in net.load.name.unique():
+    for n in net.load.zone.unique():
         if not n is None:
-            profiler.add_profile_idx('load', net.load[net.load.name==n].index, variable='scaling', profile=str(n))
+            profiler.add_profile_idx('load', net.load[net.load.zone==n].index, variable='scaling', profile=str(n))
     # Setting iterator
     time_steps=profiler.profiles_db.index   
     iterator = Iterator(net=net, profiler=profiler)
     of = folder + r'\Results_Base'
-    iterator.iterate(time_steps=time_steps, save=True, outputfolder=of, ultraverbose=False)
+    iterator.iterate(time_steps=time_steps[0:10], save=True, outputfolder=of, ultraverbose=False)
 
     #%% Plot some results - base case
     
@@ -400,7 +401,7 @@ if v in ['Y', 'y', True]:
     folder = r'c:\user\U546416\Documents\PhD\Data\MVGrids\Boriette\\'
     of = folder + r'\Results_PV_voltvar'
     # Run
-    iterator.iterate(time_steps=time_steps, save=True, outputfolder=of, ultraverbose=False)
+    iterator.iterate(time_steps=time_steps[0:10], save=True, outputfolder=of, ultraverbose=False)
 
     #%% Plotting some results
     
